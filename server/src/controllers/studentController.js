@@ -121,18 +121,32 @@ const createStudent = asyncHandler(async (req, res) => {
 // @desc    Update a student
 // @route   PUT /api/students/:id
 // @access  Private
+// Fields a client is allowed to modify on a student record.
+// Anything else in the request body (id, studentId, _count, createdAt,
+// updatedAt, feePayments, etc.) is deliberately ignored.
+const EDITABLE_STUDENT_FIELDS = [
+  'rollNumber', 'enrollmentNumber', 'firstName', 'lastName', 'fathersName',
+  'mothersName', 'dob', 'gender', 'mobile', 'altMobile', 'email', 'address',
+  'department', 'course', 'branch', 'semester', 'section', 'academicSession',
+  'admissionDate', 'status', 'totalFeeAssigned',
+];
+
 const updateStudent = asyncHandler(async (req, res) => {
   const existing = await prisma.student.findUnique({ where: { id: req.params.id } });
   if (!existing) throw new ApiError(404, 'Student not found');
 
-  const data = { ...req.body };
+  const data = {};
+  EDITABLE_STUDENT_FIELDS.forEach((field) => {
+    if (req.body[field] !== undefined) data[field] = req.body[field];
+  });
+
   if (data.semester) data.semester = Number(data.semester);
   if (data.dob) data.dob = new Date(data.dob);
+  if (data.admissionDate) data.admissionDate = new Date(data.admissionDate);
   if (data.totalFeeAssigned) data.totalFeeAssigned = Number(data.totalFeeAssigned);
 
   if (req.file) {
     data.photoUrl = `/uploads/students/${req.file.filename}`;
-    // Remove old photo file if it exists
     if (existing.photoUrl) {
       const oldPath = path.join(__dirname, '..', '..', existing.photoUrl);
       fs.unlink(oldPath, () => {});
@@ -140,10 +154,7 @@ const updateStudent = asyncHandler(async (req, res) => {
   }
 
   const student = await prisma.student.update({ where: { id: req.params.id }, data });
-
-  res.status(200).json(new ApiResponse(200, student, 'Student updated successfully'));
-});
-
+  // ...rest of the function stays the same
 // @desc    Delete a student
 // @route   DELETE /api/students/:id
 // @access  Private
