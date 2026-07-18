@@ -118,19 +118,36 @@ const createStudent = asyncHandler(async (req, res) => {
   res.status(201).json(new ApiResponse(201, student, 'Student created successfully'));
 });
 
-// @desc    Update a student
-// @route   PUT /api/students/:id
-// @access  Private
 // Fields a client is allowed to modify on a student record.
 // Anything else in the request body (id, studentId, _count, createdAt,
 // updatedAt, feePayments, etc.) is deliberately ignored.
 const EDITABLE_STUDENT_FIELDS = [
-  'rollNumber', 'enrollmentNumber', 'firstName', 'lastName', 'fathersName',
-  'mothersName', 'dob', 'gender', 'mobile', 'altMobile', 'email', 'address',
-  'department', 'course', 'branch', 'semester', 'section', 'academicSession',
-  'admissionDate', 'status', 'totalFeeAssigned',
+  'rollNumber',
+  'enrollmentNumber',
+  'firstName',
+  'lastName',
+  'fathersName',
+  'mothersName',
+  'dob',
+  'gender',
+  'mobile',
+  'altMobile',
+  'email',
+  'address',
+  'department',
+  'course',
+  'branch',
+  'semester',
+  'section',
+  'academicSession',
+  'admissionDate',
+  'status',
+  'totalFeeAssigned',
 ];
 
+// @desc    Update a student
+// @route   PUT /api/students/:id
+// @access  Private
 const updateStudent = asyncHandler(async (req, res) => {
   const existing = await prisma.student.findUnique({ where: { id: req.params.id } });
   if (!existing) throw new ApiError(404, 'Student not found');
@@ -147,6 +164,7 @@ const updateStudent = asyncHandler(async (req, res) => {
 
   if (req.file) {
     data.photoUrl = `/uploads/students/${req.file.filename}`;
+    // Remove old photo file if it exists
     if (existing.photoUrl) {
       const oldPath = path.join(__dirname, '..', '..', existing.photoUrl);
       fs.unlink(oldPath, () => {});
@@ -154,7 +172,10 @@ const updateStudent = asyncHandler(async (req, res) => {
   }
 
   const student = await prisma.student.update({ where: { id: req.params.id }, data });
-  // ...rest of the function stays the same
+
+  res.status(200).json(new ApiResponse(200, student, 'Student updated successfully'));
+});
+
 // @desc    Delete a student
 // @route   DELETE /api/students/:id
 // @access  Private
