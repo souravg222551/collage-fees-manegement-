@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import toast from 'react-hot-toast';
 import { FileBarChart, Download, FileText } from 'lucide-react';
 import { reportApi } from '../api/services';
-import { Card, Skeleton, EmptyState } from '../components/ui/Primitives';
+import { Card, Skeleton, EmptyState, Spinner } from '../components/ui/Primitives';
 import { formatCurrency, formatDate } from '../utils/format';
 
 const REPORT_TYPES = [
@@ -28,6 +29,7 @@ const ReportsPage = () => {
   const [type, setType] = useState('monthly');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
+  const [exporting, setExporting] = useState(null); // 'csv' | 'pdf' | null
 
   const params = { type, ...(from && { from }), ...(to && { to }) };
 
@@ -39,6 +41,18 @@ const ReportsPage = () => {
   const report = data?.data?.data;
   const payments = report?.payments || [];
   const summary = report?.summary;
+
+  const handleExport = async (format) => {
+    setExporting(format);
+    try {
+      if (format === 'csv') await reportApi.downloadCsv(params);
+      else await reportApi.downloadPdf(params);
+    } catch (err) {
+      toast.error(err.response?.data?.message || `Failed to export ${format.toUpperCase()}`);
+    } finally {
+      setExporting(null);
+    }
+  };
 
   return (
     <div className="space-y-5">
@@ -63,12 +77,12 @@ const ReportsPage = () => {
             <input type="date" className="input" value={to} onChange={(e) => setTo(e.target.value)} />
           </div>
           <div className="flex gap-2 ml-auto">
-            <a href={reportApi.csvUrl(params)} className="btn-secondary" target="_blank" rel="noreferrer">
-              <Download size={15} /> CSV
-            </a>
-            <a href={reportApi.pdfUrl(params)} className="btn-secondary" target="_blank" rel="noreferrer">
-              <FileText size={15} /> PDF
-            </a>
+            <button className="btn-secondary" onClick={() => handleExport('csv')} disabled={exporting !== null}>
+              {exporting === 'csv' ? <Spinner className="w-4 h-4" /> : <Download size={15} />} CSV
+            </button>
+            <button className="btn-secondary" onClick={() => handleExport('pdf')} disabled={exporting !== null}>
+              {exporting === 'pdf' ? <Spinner className="w-4 h-4" /> : <FileText size={15} />} PDF
+            </button>
           </div>
         </div>
       </Card>

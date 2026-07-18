@@ -1,5 +1,36 @@
 import api from './client';
 
+// Downloads a file through an authenticated axios request (so the Bearer
+// token is attached) instead of a plain <a href> link, which depends on
+// the httpOnly cookie and can be silently blocked by browsers with strict
+// cross-site cookie policies (Brave, Safari ITP, etc.).
+const downloadFile = async (url, params, fallbackName) => {
+  const response = await api.get(url, { params, responseType: 'blob' });
+
+  const disposition = response.headers['content-disposition'];
+  const match = disposition && disposition.match(/filename="?([^"]+)"?/);
+  const filename = match ? match[1] : fallbackName;
+
+  const blobUrl = window.URL.createObjectURL(response.data);
+  const link = document.createElement('a');
+  link.href = blobUrl;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(blobUrl);
+};
+
+// Opens a file in a new tab via an authenticated request (for PDFs meant
+// to be viewed inline, e.g. receipts) instead of a raw link.
+const openFile = async (url, params) => {
+  const response = await api.get(url, { params, responseType: 'blob' });
+  const blobUrl = window.URL.createObjectURL(response.data);
+  window.open(blobUrl, '_blank');
+  // Revoke after a delay so the new tab has time to load it
+  setTimeout(() => window.URL.revokeObjectURL(blobUrl), 60_000);
+};
+
 // ---- Auth ----
 export const authApi = {
   login: (data) => api.post('/auth/login', data),
@@ -35,7 +66,8 @@ export const feeApi = {
 export const receiptApi = {
   list: (params) => api.get('/receipts', { params }),
   get: (id) => api.get(`/receipts/${id}`),
-  pdfUrl: (id) => `${api.defaults.baseURL}/receipts/${id}/pdf`,
+  viewPdf: (id) => openFile(`/receipts/${id}/pdf`),
+  downloadPdf: (id, receiptNumber) => downloadFile(`/receipts/${id}/pdf`, {}, `${receiptNumber || 'receipt'}.pdf`),
 };
 
 // ---- Dashboard ----
@@ -49,8 +81,8 @@ export const dashboardApi = {
 // ---- Reports ----
 export const reportApi = {
   generate: (params) => api.get('/reports', { params }),
-  csvUrl: (params) => `${api.defaults.baseURL}/reports/export/csv?${new URLSearchParams(params)}`,
-  pdfUrl: (params) => `${api.defaults.baseURL}/reports/export/pdf?${new URLSearchParams(params)}`,
+  downloadCsv: (params) => downloadFile('/reports/export/csv', params, `${params.type || 'report'}-report.csv`),
+  downloadPdf: (params) => downloadFile('/reports/export/pdf', params, `${params.type || 'report'}-report.pdf`),
 };
 
 // ---- Settings ----

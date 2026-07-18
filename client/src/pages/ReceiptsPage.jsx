@@ -1,15 +1,17 @@
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
+import toast from 'react-hot-toast';
 import { Search, Receipt as ReceiptIcon, Eye, Download } from 'lucide-react';
 import { receiptApi } from '../api/services';
-import { Card, Skeleton, EmptyState, Pagination } from '../components/ui/Primitives';
+import { Card, Skeleton, EmptyState, Pagination, Spinner } from '../components/ui/Primitives';
 import { formatCurrency, formatDateTime } from '../utils/format';
 import useDebounce from '../hooks/useDebounce';
 
 const ReceiptsPage = () => {
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
+  const [downloadingId, setDownloadingId] = useState(null);
   const debounced = useDebounce(search, 400);
 
   const { data, isLoading } = useQuery({
@@ -19,6 +21,17 @@ const ReceiptsPage = () => {
 
   const receipts = data?.data?.data?.receipts || [];
   const pagination = data?.data?.data?.pagination;
+
+  const handleDownload = async (receipt) => {
+    setDownloadingId(receipt.id);
+    try {
+      await receiptApi.downloadPdf(receipt.id, receipt.receiptNumber);
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to download receipt');
+    } finally {
+      setDownloadingId(null);
+    }
+  };
 
   return (
     <div className="space-y-5">
@@ -83,15 +96,14 @@ const ReceiptsPage = () => {
                         >
                           <Eye size={14} />
                         </Link>
-                        <a
-                          href={receiptApi.pdfUrl(r.id)}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+                        <button
+                          onClick={() => handleDownload(r)}
+                          disabled={downloadingId === r.id}
+                          className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50"
                           title="Download PDF"
                         >
-                          <Download size={14} />
-                        </a>
+                          {downloadingId === r.id ? <Spinner className="w-3.5 h-3.5" /> : <Download size={14} />}
+                        </button>
                       </div>
                     </td>
                   </tr>

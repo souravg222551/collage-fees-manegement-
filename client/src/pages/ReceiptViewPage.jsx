@@ -1,10 +1,11 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
+import toast from 'react-hot-toast';
 import { ArrowLeft, Printer, Download } from 'lucide-react';
 import { receiptApi } from '../api/services';
 import { BASE_URL } from '../api/client';
-import { Card, Skeleton } from '../components/ui/Primitives';
+import { Card, Skeleton, Spinner } from '../components/ui/Primitives';
 import { formatCurrency, formatDate } from '../utils/format';
 
 const Row = ({ label, value }) => (
@@ -17,6 +18,7 @@ const Row = ({ label, value }) => (
 const ReceiptViewPage = () => {
   const { id } = useParams();
   const navigate = useNavigate();
+  const [downloading, setDownloading] = useState(false);
 
   const { data, isLoading } = useQuery({
     queryKey: ['receipts', id],
@@ -27,6 +29,17 @@ const ReceiptViewPage = () => {
   const settings = data?.data?.data?.settings;
   const payment = receipt?.feePayment;
   const student = payment?.student;
+
+  const handleDownload = async () => {
+    setDownloading(true);
+    try {
+      await receiptApi.downloadPdf(id, receipt?.receiptNumber);
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to download receipt');
+    } finally {
+      setDownloading(false);
+    }
+  };
 
   if (isLoading) return <Skeleton className="h-96 w-full max-w-2xl mx-auto" />;
   if (!receipt) return null;
@@ -41,9 +54,9 @@ const ReceiptViewPage = () => {
           <button onClick={() => window.print()} className="btn-secondary">
             <Printer size={15} /> Print
           </button>
-          <a href={receiptApi.pdfUrl(id)} target="_blank" rel="noreferrer" className="btn-primary">
-            <Download size={15} /> Download PDF
-          </a>
+          <button onClick={handleDownload} disabled={downloading} className="btn-primary">
+            {downloading ? <Spinner className="w-4 h-4" /> : <Download size={15} />} Download PDF
+          </button>
         </div>
       </div>
 
