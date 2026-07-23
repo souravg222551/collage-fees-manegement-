@@ -4,6 +4,7 @@ const prisma = require('../config/prisma');
 const ApiError = require('../utils/ApiError');
 const ApiResponse = require('../utils/ApiResponse');
 const generateToken = require('../utils/generateToken');
+const { uploadBufferToCloudinary, deleteFromCloudinary } = require('../config/cloudinary');
 
 // @desc    Authenticate admin & set JWT cookie
 // @route   POST /api/auth/login
@@ -75,11 +76,20 @@ const changePassword = asyncHandler(async (req, res) => {
 // @access  Private
 const updateProfile = asyncHandler(async (req, res) => {
   const { name } = req.body;
-  const avatarUrl = req.file ? `/uploads/logos/${req.file.filename}` : undefined;
+
+  const data = {};
+  if (name) data.name = name;
+
+  if (req.file) {
+    const uploaded = await uploadBufferToCloudinary(req.file.buffer, 'avatars');
+    data.avatarUrl = uploaded.url;
+    data.avatarPublicId = uploaded.publicId;
+    if (req.admin.avatarPublicId) await deleteFromCloudinary(req.admin.avatarPublicId);
+  }
 
   const updated = await prisma.admin.update({
     where: { id: req.admin.id },
-    data: { ...(name && { name }), ...(avatarUrl && { avatarUrl }) },
+    data,
   });
 
   const { password: _pw, ...safeAdmin } = updated;

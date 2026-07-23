@@ -4,7 +4,6 @@ import { useQuery } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { ArrowLeft, Printer, Download } from 'lucide-react';
 import { receiptApi } from '../api/services';
-import { BASE_URL } from '../api/client';
 import { Card, Skeleton, Spinner } from '../components/ui/Primitives';
 import { formatCurrency, formatDate } from '../utils/format';
 
@@ -63,7 +62,7 @@ const ReceiptViewPage = () => {
       <Card className="max-w-2xl mx-auto p-8 print:shadow-none print:border-none" id="receipt-print">
         <div className="flex items-center gap-4 border-b border-slate-100 dark:border-slate-800 pb-5">
           {settings?.logoUrl && (
-            <img src={`${BASE_URL}${settings.logoUrl}`} alt="" className="w-14 h-14 object-contain" />
+            <img src={settings.logoUrl} alt="" className="w-14 h-14 object-contain" />
           )}
           <div>
             <h2 className="text-lg font-semibold text-slate-900 dark:text-white">{settings?.collegeName}</h2>

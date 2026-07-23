@@ -1,10 +1,10 @@
 const asyncHandler = require('express-async-handler');
-const fs = require('fs');
-const path = require('path');
 const prisma = require('../config/prisma');
 const ApiError = require('../utils/ApiError');
 const ApiResponse = require('../utils/ApiResponse');
-const { generateStudentId } = require('../utils/idGenerator');
+const { generateStudentId, getOrCreateSettings } = require('../utils/idGenerator');
+const { uploadBufferToCloudinary, deleteFromCloudinary } = require('../config/cloudinary');
+const { billStudentForExistingStructure } = require('./feeStructureController');
 
 // @desc    List students with search, filters, and pagination
 // @route   GET /api/students
@@ -16,6 +16,8 @@ const getStudents = asyncHandler(async (req, res) => {
     course,
     branch,
     semester,
+    grade,
+    stream,
     section,
     academicSession,
     status,
@@ -25,8 +27,14 @@ const getStudents = asyncHandler(async (req, res) => {
     sortOrder = 'desc',
   } = req.query;
 
+  // Always scope the list to whichever institution type is currently
+  // active in Settings, so switching College <-> School never mixes the
+  // two sets of students together.
+  const settings = await getOrCreateSettings();
+
   const where = {
     AND: [
+      { institutionType: settings.institutionType },
       search
         ? {
             OR: [
@@ -44,6 +52,8 @@ const getStudents = asyncHandler(async (req, res) => {
       course ? { course } : {},
       branch ? { branch } : {},
       semester ? { semester: Number(semester) } : {},
+      grade ? { grade } : {},
+      stream ? { stream } : {},
       section ? { section } : {},
       academicSession ? { academicSession } : {},
       status ? { status } : {},
@@ -106,14 +116,28 @@ const getStudentById = asyncHandler(async (req, res) => {
 // @access  Private
 const createStudent = asyncHandler(async (req, res) => {
   const studentId = await generateStudentId();
-  const photoUrl = req.file ? `/uploads/students/${req.file.filename}` : null;
+  const settings = await getOrCreateSettings();
 
-  const data = { ...req.body, studentId, photoUrl };
+  let photoUrl = null;
+  let photoPublicId = null;
+  if (req.file) {
+    const uploaded = await uploadBufferToCloudinary(req.file.buffer, 'students');
+    photoUrl = uploaded.url;
+    photoPublicId = uploaded.publicId;
+  }
+
+  const data = { ...req.body, studentId, photoUrl, photoPublicId, institutionType: settings.institutionType };
   if (data.semester) data.semester = Number(data.semester);
+  else delete data.semester;
   if (data.dob) data.dob = new Date(data.dob);
   if (data.totalFeeAssigned) data.totalFeeAssigned = Number(data.totalFeeAssigned);
 
   const student = await prisma.student.create({ data });
+
+  // Immediately bill this student for whatever required fee categories
+  // already exist for their group (e.g. adding a new "5th" grade student
+  // to a class that already has Tuition/Exam/Annual Charge defined).
+  await billStudentForExistingStructure(student);
 
   res.status(201).json(new ApiResponse(201, student, 'Student created successfully'));
 });
@@ -134,10 +158,16 @@ const EDITABLE_STUDENT_FIELDS = [
   'altMobile',
   'email',
   'address',
+  'aadharNumber',
+  // College-mode fields
   'department',
   'course',
   'branch',
   'semester',
+  // School-mode fields
+  'grade',
+  'stream',
+  // Shared
   'section',
   'academicSession',
   'admissionDate',
@@ -163,12 +193,11 @@ const updateStudent = asyncHandler(async (req, res) => {
   if (data.totalFeeAssigned) data.totalFeeAssigned = Number(data.totalFeeAssigned);
 
   if (req.file) {
-    data.photoUrl = `/uploads/students/${req.file.filename}`;
-    // Remove old photo file if it exists
-    if (existing.photoUrl) {
-      const oldPath = path.join(__dirname, '..', '..', existing.photoUrl);
-      fs.unlink(oldPath, () => {});
-    }
+    const uploaded = await uploadBufferToCloudinary(req.file.buffer, 'students');
+    data.photoUrl = uploaded.url;
+    data.photoPublicId = uploaded.publicId;
+    // Clean up the old Cloudinary image now that the new one is uploaded
+    if (existing.photoPublicId) await deleteFromCloudinary(existing.photoPublicId);
   }
 
   const student = await prisma.student.update({ where: { id: req.params.id }, data });
@@ -185,10 +214,7 @@ const deleteStudent = asyncHandler(async (req, res) => {
 
   await prisma.student.delete({ where: { id: req.params.id } });
 
-  if (existing.photoUrl) {
-    const filePath = path.join(__dirname, '..', '..', existing.photoUrl);
-    fs.unlink(filePath, () => {});
-  }
+  if (existing.photoPublicId) await deleteFromCloudinary(existing.photoPublicId);
 
   res.status(200).json(new ApiResponse(200, null, 'Student deleted successfully'));
 });
@@ -197,19 +223,26 @@ const deleteStudent = asyncHandler(async (req, res) => {
 // @route   GET /api/students/meta/filters
 // @access  Private
 const getFilterOptions = asyncHandler(async (req, res) => {
-  const [departments, courses, branches, sessions] = await Promise.all([
-    prisma.student.findMany({ distinct: ['department'], select: { department: true } }),
-    prisma.student.findMany({ distinct: ['course'], select: { course: true } }),
-    prisma.student.findMany({ distinct: ['branch'], select: { branch: true } }),
-    prisma.student.findMany({ distinct: ['academicSession'], select: { academicSession: true } }),
+  const settings = await getOrCreateSettings();
+  const where = { institutionType: settings.institutionType };
+
+  const [departments, courses, branches, grades, streams, sessions] = await Promise.all([
+    prisma.student.findMany({ where, distinct: ['department'], select: { department: true } }),
+    prisma.student.findMany({ where, distinct: ['course'], select: { course: true } }),
+    prisma.student.findMany({ where, distinct: ['branch'], select: { branch: true } }),
+    prisma.student.findMany({ where, distinct: ['grade'], select: { grade: true } }),
+    prisma.student.findMany({ where, distinct: ['stream'], select: { stream: true } }),
+    prisma.student.findMany({ where, distinct: ['academicSession'], select: { academicSession: true } }),
   ]);
 
   res.status(200).json(
     new ApiResponse(200, {
-      departments: departments.map((d) => d.department),
-      courses: courses.map((c) => c.course),
-      branches: branches.map((b) => b.branch),
-      sessions: sessions.map((s) => s.academicSession),
+      departments: departments.map((d) => d.department).filter(Boolean),
+      courses: courses.map((c) => c.course).filter(Boolean),
+      branches: branches.map((b) => b.branch).filter(Boolean),
+      grades: grades.map((g) => g.grade).filter(Boolean),
+      streams: streams.map((s) => s.stream).filter(Boolean),
+      sessions: sessions.map((s) => s.academicSession).filter(Boolean),
     })
   );
 });

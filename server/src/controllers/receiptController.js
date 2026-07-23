@@ -4,8 +4,20 @@ const prisma = require('../config/prisma');
 const ApiError = require('../utils/ApiError');
 const ApiResponse = require('../utils/ApiResponse');
 const { getOrCreateSettings } = require('../utils/idGenerator');
-const path = require('path');
-const fs = require('fs');
+
+// Downloads an image from a remote URL (e.g. Cloudinary) into a buffer so
+// it can be embedded in a PDFKit document, which only accepts local paths
+// or buffers — not remote URLs.
+const fetchImageBuffer = async (url) => {
+  try {
+    const response = await fetch(url);
+    if (!response.ok) return null;
+    const arrayBuffer = await response.arrayBuffer();
+    return Buffer.from(arrayBuffer);
+  } catch {
+    return null;
+  }
+};
 
 // @desc    Get receipt details (JSON) for on-screen preview
 // @route   GET /api/receipts/:id
@@ -90,9 +102,9 @@ const downloadReceiptPdf = asyncHandler(async (req, res) => {
 
   // Header
   if (settings.logoUrl) {
-    const logoPath = path.join(__dirname, '..', '..', settings.logoUrl);
-    if (fs.existsSync(logoPath)) {
-      doc.image(logoPath, 50, 45, { width: 60 });
+    const logoBuffer = await fetchImageBuffer(settings.logoUrl);
+    if (logoBuffer) {
+      doc.image(logoBuffer, 50, 45, { width: 60 });
     }
   }
   doc
@@ -145,7 +157,7 @@ const downloadReceiptPdf = asyncHandler(async (req, res) => {
 
   const tableTop = y;
   const rows = [
-    ['Fee Type', payment.feeType],
+    ['Fee Type', payment.label || payment.feeType],
     ['Total Amount', formatCurrency(payment.totalAmount)],
     ['Fine', formatCurrency(payment.fine)],
     ['Discount', `- ${formatCurrency(payment.discount)}`],

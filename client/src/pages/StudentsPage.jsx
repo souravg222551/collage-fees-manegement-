@@ -3,29 +3,41 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { Search, Plus, Pencil, Trash2, Users, Filter } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { studentApi } from '../api/services';
-import { BASE_URL } from '../api/client';
+import { studentApi, settingsApi } from '../api/services';
 import { Card, Skeleton, StatusBadge, Pagination, EmptyState } from '../components/ui/Primitives';
 import { formatDate, initials } from '../utils/format';
 import StudentFormModal from '../components/students/StudentFormModal';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
 import useDebounce from '../hooks/useDebounce';
+import { useAuth } from '../context/AuthContext';
 
 const StudentsPage = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { admin } = useAuth();
+  const canDelete = admin?.role === 'SUPER_ADMIN' || admin?.role === 'ADMIN';
+
   const [search, setSearch] = useState('');
   const debouncedSearch = useDebounce(search, 400);
   const [page, setPage] = useState(1);
-  const [department, setDepartment] = useState('');
+  const [groupFilter, setGroupFilter] = useState(''); // department (college) or grade (school)
   const [modalOpen, setModalOpen] = useState(false);
   const [editingStudent, setEditingStudent] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
 
+  const { data: settingsData } = useQuery({ queryKey: ['settings'], queryFn: settingsApi.get });
+  const institutionType = settingsData?.data?.data?.institutionType || 'COLLEGE';
+  const isSchool = institutionType === 'SCHOOL';
+
   const { data, isLoading } = useQuery({
-    queryKey: ['students', { search: debouncedSearch, page, department }],
+    queryKey: ['students', { search: debouncedSearch, page, groupFilter, isSchool }],
     queryFn: () =>
-      studentApi.list({ search: debouncedSearch, page, limit: 12, department: department || undefined }),
+      studentApi.list({
+        search: debouncedSearch,
+        page,
+        limit: 12,
+        ...(isSchool ? { grade: groupFilter || undefined } : { department: groupFilter || undefined }),
+      }),
   });
 
   const { data: filtersRes } = useQuery({ queryKey: ['students', 'filters'], queryFn: studentApi.filters });
@@ -42,7 +54,9 @@ const StudentsPage = () => {
 
   const students = data?.data?.data?.students || [];
   const pagination = data?.data?.data?.pagination;
-  const departments = filtersRes?.data?.data?.departments || [];
+  const groupOptions = isSchool
+    ? filtersRes?.data?.data?.grades || []
+    : filtersRes?.data?.data?.departments || [];
 
   return (
     <div className="space-y-5">
@@ -65,14 +79,14 @@ const StudentsPage = () => {
             <Filter size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <select
               className="input pl-8 pr-8 w-44"
-              value={department}
+              value={groupFilter}
               onChange={(e) => {
-                setDepartment(e.target.value);
+                setGroupFilter(e.target.value);
                 setPage(1);
               }}
             >
-              <option value="">All Departments</option>
-              {departments.map((d) => (
+              <option value="">{isSchool ? 'All Classes' : 'All Departments'}</option>
+              {groupOptions.map((d) => (
                 <option key={d} value={d}>
                   {d}
                 </option>
@@ -97,8 +111,8 @@ const StudentsPage = () => {
             <thead>
               <tr className="border-b border-slate-100 dark:border-slate-800 text-left text-xs font-medium text-slate-500 uppercase tracking-wide">
                 <th className="px-5 py-3">Student</th>
-                <th className="px-5 py-3">Department / Course</th>
-                <th className="px-5 py-3">Semester</th>
+                <th className="px-5 py-3">{isSchool ? 'Class' : 'Department / Course'}</th>
+                <th className="px-5 py-3">{isSchool ? 'Section' : 'Semester'}</th>
                 <th className="px-5 py-3">Contact</th>
                 <th className="px-5 py-3">Status</th>
                 <th className="px-5 py-3">Admitted</th>
@@ -134,7 +148,7 @@ const StudentsPage = () => {
                     <td className="px-5 py-3">
                       <div className="flex items-center gap-3">
                         {s.photoUrl ? (
-                          <img src={`${BASE_URL}${s.photoUrl}`} alt="" className="w-8 h-8 rounded-full object-cover" />
+                          <img src={s.photoUrl} alt="" className="w-8 h-8 rounded-full object-cover" />
                         ) : (
                           <div className="w-8 h-8 rounded-full bg-brand-100 dark:bg-brand-500/20 text-brand-700 dark:text-brand-400 flex items-center justify-center text-xs font-semibold">
                             {initials(s.firstName, s.lastName)}
@@ -149,14 +163,23 @@ const StudentsPage = () => {
                       </div>
                     </td>
                     <td className="px-5 py-3 text-slate-600 dark:text-slate-400">
-                      {s.department}
-                      <br />
-                      <span className="text-xs text-slate-400">
-                        {s.course} - {s.branch}
-                      </span>
+                      {isSchool ? (
+                        <>
+                          {s.grade}
+                          {s.stream && <span className="text-xs text-slate-400"> - {s.stream}</span>}
+                        </>
+                      ) : (
+                        <>
+                          {s.department}
+                          <br />
+                          <span className="text-xs text-slate-400">
+                            {s.course} - {s.branch}
+                          </span>
+                        </>
+                      )}
                     </td>
                     <td className="px-5 py-3 text-slate-600 dark:text-slate-400">
-                      Sem {s.semester} - {s.section}
+                      {isSchool ? s.section : `Sem ${s.semester} - ${s.section}`}
                     </td>
                     <td className="px-5 py-3 text-slate-600 dark:text-slate-400">{s.mobile}</td>
                     <td className="px-5 py-3">
@@ -174,12 +197,14 @@ const StudentsPage = () => {
                         >
                           <Pencil size={14} />
                         </button>
-                        <button
-                          className="p-1.5 rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10"
-                          onClick={() => setDeleteTarget(s)}
-                        >
-                          <Trash2 size={14} />
-                        </button>
+                        {canDelete && (
+                          <button
+                            className="p-1.5 rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10"
+                            onClick={() => setDeleteTarget(s)}
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>

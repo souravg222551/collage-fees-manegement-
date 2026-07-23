@@ -9,10 +9,13 @@ import { formatCurrency, formatDate } from '../utils/format';
 import CollectFeePanel from '../components/fees/CollectFeePanel';
 import EditPaymentModal from '../components/fees/EditPaymentModal';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
+import { useAuth } from '../context/AuthContext';
 
 const STATUS_OPTIONS = ['', 'PAID', 'PARTIAL', 'PENDING', 'OVERDUE', 'CANCELLED', 'REFUNDED'];
 
 const FeesPage = () => {
+  const { admin } = useAuth();
+  const canDelete = admin?.role === 'SUPER_ADMIN' || admin?.role === 'ADMIN';
   const [searchParams] = useSearchParams();
   const presetStudentId = searchParams.get('studentId');
   const queryClient = useQueryClient();
@@ -134,12 +137,14 @@ const FeesPage = () => {
                         >
                           <Pencil size={14} />
                         </button>
-                        <button
-                          className="p-1.5 rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10"
-                          onClick={() => setDeleteTarget(p)}
-                        >
-                          <Trash2 size={14} />
-                        </button>
+                        {canDelete && (
+                          <button
+                            className="p-1.5 rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10"
+                            onClick={() => setDeleteTarget(p)}
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>

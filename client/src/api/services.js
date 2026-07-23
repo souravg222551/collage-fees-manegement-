@@ -58,6 +58,7 @@ export const feeApi = {
   list: (params) => api.get('/fees', { params }),
   get: (id) => api.get(`/fees/${id}`),
   collect: (data) => api.post('/fees', data),
+  collectBulk: (data) => api.post('/fees/bulk', data),
   update: (id, data) => api.put(`/fees/${id}`, data),
   remove: (id) => api.delete(`/fees/${id}`),
 };
@@ -85,9 +86,37 @@ export const reportApi = {
   downloadPdf: (params) => downloadFile('/reports/export/pdf', params, `${params.type || 'report'}-report.pdf`),
 };
 
+// ---- Admin Management (Super Admin only) ----
+export const adminApi = {
+  list: () => api.get('/admins'),
+  create: (data) => api.post('/admins', data),
+  setStatus: (id, isActive) => api.put(`/admins/${id}/status`, { isActive }),
+  remove: (id) => api.delete(`/admins/${id}`),
+};
+
+// ---- Fee Structure (class-level fee categories, per Class/Course+Semester group) ----
+export const feeStructureApi = {
+  groups: () => api.get('/fee-structure/groups'),
+  get: (academicSession, groupLabel) => api.get('/fee-structure', { params: { academicSession, groupLabel } }),
+  addItem: (data) => api.post('/fee-structure', data),
+  updateItem: (id, data) => api.put(`/fee-structure/${id}`, data),
+  removeItem: (id) => api.delete(`/fee-structure/${id}`),
+  studentSummary: (studentId) => api.get(`/fee-structure/summary/${studentId}`),
+  syncCharges: () => api.post('/fee-structure/sync-charges'),
+};
+
+// ---- Per-student optional/custom fee add-ons (e.g. Transport, Hostel) ----
+export const studentFeeItemApi = {
+  catalog: (studentId) => api.get(`/students/${studentId}/fee-items/catalog`),
+  list: (studentId) => api.get(`/students/${studentId}/fee-items`),
+  add: (studentId, data) => api.post(`/students/${studentId}/fee-items`, data),
+  remove: (studentId, itemId) => api.delete(`/students/${studentId}/fee-items/${itemId}`),
+};
+
 // ---- Settings ----
 export const settingsApi = {
   get: () => api.get('/settings'),
   update: (formData) =>
     api.put('/settings', formData, { headers: { 'Content-Type': 'multipart/form-data' } }),
 };
+

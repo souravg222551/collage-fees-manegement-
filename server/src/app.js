@@ -11,8 +11,11 @@ const path = require('path');
 const { notFound, errorHandler } = require('./middleware/errorHandler');
 
 const authRoutes = require('./routes/authRoutes');
+const adminRoutes = require('./routes/adminRoutes');
 const studentRoutes = require('./routes/studentRoutes');
+const studentFeeItemRoutes = require('./routes/studentFeeItemRoutes');
 const feeRoutes = require('./routes/feeRoutes');
+const feeStructureRoutes = require('./routes/feeStructureRoutes');
 const receiptRoutes = require('./routes/receiptRoutes');
 const dashboardRoutes = require('./routes/dashboardRoutes');
 const reportRoutes = require('./routes/reportRoutes');
@@ -57,8 +60,11 @@ app.get('/api/health', (req, res) => {
 
 // --- Routes ---
 app.use('/api/auth', authRoutes);
+app.use('/api/admins', adminRoutes);
 app.use('/api/students', studentRoutes);
+app.use('/api/students/:studentId/fee-items', studentFeeItemRoutes);
 app.use('/api/fees', feeRoutes);
+app.use('/api/fee-structure', feeStructureRoutes);
 app.use('/api/receipts', receiptRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/reports', reportRoutes);

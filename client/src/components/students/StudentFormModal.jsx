@@ -1,13 +1,17 @@
 import React, { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { Camera } from 'lucide-react';
 import { Modal, Field, Spinner } from '../ui/Primitives';
-import { studentApi } from '../../api/services';
-import { BASE_URL } from '../../api/client';
+import { studentApi, settingsApi } from '../../api/services';
 
 const DEPARTMENTS = ['Computer Science', 'Electronics', 'Mechanical', 'Civil', 'Electrical', 'Business Administration'];
+const GRADES = [
+  'Nursery', 'LKG', 'UKG',
+  '1st', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th', '9th', '10th', '11th', '12th',
+];
+const STREAMS = ['Science', 'Commerce', 'Arts'];
 const GENDERS = ['MALE', 'FEMALE', 'OTHER'];
 const STATUSES = ['ACTIVE', 'INACTIVE', 'GRADUATED', 'DROPPED'];
 
@@ -17,12 +21,20 @@ const StudentFormModal = ({ open, onClose, student }) => {
   const [photoPreview, setPhotoPreview] = useState(null);
   const [photoFile, setPhotoFile] = useState(null);
 
+  const { data: settingsData } = useQuery({ queryKey: ['settings'], queryFn: settingsApi.get });
+  const institutionType = settingsData?.data?.data?.institutionType || 'COLLEGE';
+  const isSchool = institutionType === 'SCHOOL';
+
   const {
     register,
     handleSubmit,
     reset,
+    watch,
     formState: { errors, isSubmitting },
   } = useForm();
+
+  const grade = watch('grade');
+  const showStream = isSchool && ['9th', '10th', '11th', '12th'].includes(grade);
 
   useEffect(() => {
     if (open) {
@@ -34,7 +46,7 @@ const StudentFormModal = ({ open, onClose, student }) => {
             }
           : { gender: 'MALE', status: 'ACTIVE', academicSession: '2025-2026' }
       );
-      setPhotoPreview(student?.photoUrl ? `${BASE_URL}${student.photoUrl}` : null);
+      setPhotoPreview(student?.photoUrl || null);
       setPhotoFile(null);
     }
   }, [open, student, reset]);
@@ -126,29 +138,70 @@ const StudentFormModal = ({ open, onClose, student }) => {
           <Field label="Enrollment Number" required error={errors.enrollmentNumber?.message}>
             <input className="input" {...register('enrollmentNumber', { required: 'Required' })} />
           </Field>
-          <Field label="Department" required error={errors.department?.message}>
-            <input list="departments" className="input" {...register('department', { required: 'Required' })} />
-            <datalist id="departments">
-              {DEPARTMENTS.map((d) => (
-                <option key={d} value={d} />
-              ))}
-            </datalist>
-          </Field>
-          <Field label="Course" required error={errors.course?.message}>
-            <input className="input" placeholder="B.Tech / B.Sc / MBA" {...register('course', { required: 'Required' })} />
-          </Field>
-          <Field label="Branch" required error={errors.branch?.message}>
-            <input className="input" {...register('branch', { required: 'Required' })} />
-          </Field>
-          <Field label="Semester" required error={errors.semester?.message}>
+          <Field label="Aadhaar Number" error={errors.aadharNumber?.message}>
             <input
-              type="number"
-              min="1"
-              max="12"
               className="input"
-              {...register('semester', { required: 'Required', valueAsNumber: true })}
+              placeholder="12-digit number"
+              maxLength={12}
+              {...register('aadharNumber', {
+                pattern: { value: /^\d{12}$/, message: 'Must be exactly 12 digits' },
+              })}
             />
           </Field>
+
+          {isSchool ? (
+            <>
+              <Field label="Class / Grade" required error={errors.grade?.message}>
+                <select className="input" {...register('grade', { required: 'Required' })}>
+                  <option value="">Select class</option>
+                  {GRADES.map((g) => (
+                    <option key={g} value={g}>
+                      {g}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              {showStream && (
+                <Field label="Stream">
+                  <select className="input" {...register('stream')}>
+                    <option value="">Select stream</option>
+                    {STREAMS.map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              )}
+            </>
+          ) : (
+            <>
+              <Field label="Department" required error={errors.department?.message}>
+                <input list="departments" className="input" {...register('department', { required: 'Required' })} />
+                <datalist id="departments">
+                  {DEPARTMENTS.map((d) => (
+                    <option key={d} value={d} />
+                  ))}
+                </datalist>
+              </Field>
+              <Field label="Course" required error={errors.course?.message}>
+                <input className="input" placeholder="B.Tech / B.Sc / MBA" {...register('course', { required: 'Required' })} />
+              </Field>
+              <Field label="Branch" required error={errors.branch?.message}>
+                <input className="input" {...register('branch', { required: 'Required' })} />
+              </Field>
+              <Field label="Semester" required error={errors.semester?.message}>
+                <input
+                  type="number"
+                  min="1"
+                  max="12"
+                  className="input"
+                  {...register('semester', { required: 'Required', valueAsNumber: true })}
+                />
+              </Field>
+            </>
+          )}
+
           <Field label="Section" required error={errors.section?.message}>
             <input className="input" {...register('section', { required: 'Required' })} />
           </Field>
@@ -164,10 +217,12 @@ const StudentFormModal = ({ open, onClose, student }) => {
               ))}
             </select>
           </Field>
-          <Field label="Total Fee Assigned (₹)">
-            <input type="number" step="0.01" className="input" {...register('totalFeeAssigned')} />
-          </Field>
         </div>
+
+        <p className="text-xs text-slate-500 -mt-2">
+          Fee totals are calculated automatically from the class Fee Structure (Settings → Fee Structure) once this
+          student is saved — no need to enter a total here.
+        </p>
 
         <Field label="Address">
           <textarea rows={2} className="input" {...register('address')} />

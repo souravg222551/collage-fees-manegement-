@@ -18,19 +18,21 @@ datasource db {
 enum AdminRole {
   SUPER_ADMIN
   ADMIN
+  ACCOUNTANT
 }
 
 model Admin {
-  id        String    @id @default(uuid())
-  name      String
-  email     String    @unique
-  password  String
-  role      AdminRole @default(ADMIN)
-  avatarUrl String?
-  isActive  Boolean   @default(true)
-  lastLogin DateTime?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  id            String    @id @default(uuid())
+  name          String
+  email         String    @unique
+  password      String
+  role          AdminRole @default(ADMIN)
+  avatarUrl     String?
+  avatarPublicId String?
+  isActive      Boolean   @default(true)
+  lastLogin     DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
   receipts FeePayment[] @relation("CollectedBy")
 
@@ -59,6 +61,7 @@ model Student {
   rollNumber        String        @unique
   enrollmentNumber  String        @unique
   photoUrl          String?
+  photoPublicId     String?
   firstName         String
   lastName          String
   fathersName       String
@@ -69,10 +72,23 @@ model Student {
   altMobile         String?
   email             String        @unique
   address           String?
-  department        String
-  course             String
-  branch            String
-  semester          Int
+  aadharNumber      String? // 12-digit Indian national ID (optional)
+
+  // Set automatically from Settings.institutionType at creation time — NOT
+  // user-editable. Used to filter the student list so College mode never
+  // shows School students and vice versa.
+  institutionType   InstitutionType @default(COLLEGE)
+
+  // ---- College-mode fields (all optional; used when Settings.institutionType = COLLEGE) ----
+  department        String?
+  course            String?
+  branch            String?
+  semester          Int?
+
+  // ---- School-mode fields (all optional; used when Settings.institutionType = SCHOOL) ----
+  grade             String? // e.g. "Nursery", "5th", "10th"
+  stream            String? // e.g. "Science", "Commerce", "Arts" (senior classes only)
+
   section           String
   academicSession   String // e.g. "2025-2026"
   admissionDate     DateTime      @default(now())
@@ -82,8 +98,11 @@ model Student {
   updatedAt         DateTime      @updatedAt
 
   feePayments FeePayment[]
+  feeItems    StudentFeeItem[]
 
-  @@index([department, course, branch, semester])
+  @@index([institutionType])
+  @@index([department, course, branch])
+  @@index([grade, stream])
   @@index([academicSession])
   @@map("students")
 }
@@ -92,15 +111,29 @@ model Student {
 // FEE PAYMENT
 // ------------------------------------------------------------
 enum FeeType {
+  REGISTRATION
+  ADMISSION
+  CAUTION_MONEY
+  ANNUAL_CHARGE
   TUITION
+  DEVELOPMENT
+  SMART_CLASS
+  ACTIVITY
+  IT_FEE
   EXAM
   HOSTEL
   TRANSPORT
   LIBRARY
   LAB
   MISCELLANEOUS
-  ADMISSION
   OTHER
+}
+
+enum FeeFrequency {
+  ONE_TIME
+  MONTHLY
+  QUARTERLY
+  ANNUAL
 }
 
 enum PaymentMode {
@@ -126,8 +159,9 @@ model FeePayment {
   student         Student       @relation(fields: [studentId], references: [id], onDelete: Cascade)
   studentId       String
   feeType         FeeType       @default(TUITION)
+  label           String? // display name at time of collection, e.g. "Transport Fee (3-6km)"
   academicSession String
-  semester        Int
+  semester        Int           @default(0) // college: semester number; school: 0 (grade tracked on Student)
   totalAmount     Decimal       @db.Decimal(12, 2) // amount due for this fee entry
   amountPaid      Decimal       @default(0) @db.Decimal(12, 2)
   discount        Decimal       @default(0) @db.Decimal(12, 2)
@@ -142,6 +176,20 @@ model FeePayment {
   dueDate         DateTime?
   collectedBy     Admin?        @relation("CollectedBy", fields: [collectedById], references: [id])
   collectedById   String?
+
+  // Links this payment back to the specific fee component it was collected
+  // for (at most one of these is set), so per-category paid/balance can be
+  // computed precisely even when a class or student has multiple items of
+  // the same feeType (e.g. two different transport distance slabs).
+  structureItemId   String?
+  structureItem     FeeStructureItem? @relation(fields: [structureItemId], references: [id], onDelete: SetNull)
+  studentFeeItemId  String?
+  studentFeeItem    StudentFeeItem?   @relation(fields: [studentFeeItemId], references: [id], onDelete: SetNull)
+
+  // Shared by all line items collected together in a single "Collect Fee"
+  // submission, so they can be shown/printed as one transaction.
+  transactionGroupId String?
+
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 
@@ -150,6 +198,7 @@ model FeePayment {
   @@index([studentId])
   @@index([status])
   @@index([paidAt])
+  @@index([transactionGroupId])
   @@map("fee_payments")
 }
 
@@ -169,21 +218,79 @@ model Receipt {
 }
 
 // ------------------------------------------------------------
+// FEE STRUCTURE (class-level template: fee categories per group)
+// ------------------------------------------------------------
+// Multiple rows per (academicSession, groupLabel) — one per fee component,
+// e.g. Tuition, Annual Charge, Development Fee, each with its own
+// frequency. groupLabel is:
+//   - School mode:  the student's `grade` (e.g. "10th")
+//   - College mode: `${course}::${semester}` (e.g. "B.Tech::3")
+// All students sharing a groupLabel + academicSession automatically get
+// every `isOptional = false` item. Optional items (e.g. Transport) are
+// only a menu — a student only owes them if given a matching StudentFeeItem.
+model FeeStructureItem {
+  id              String       @id @default(uuid())
+  academicSession String
+  groupLabel      String
+  feeType         FeeType
+  label           String? // optional display override, e.g. "Development Fee (15% of Tuition)"
+  amount          Decimal      @default(0) @db.Decimal(12, 2)
+  frequency       FeeFrequency @default(ANNUAL)
+  isOptional      Boolean      @default(false) // false = auto-applies to every student in the group
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  payments FeePayment[]
+
+  @@index([academicSession, groupLabel])
+  @@map("fee_structure_items")
+}
+
+// ------------------------------------------------------------
+// STUDENT FEE ITEM (per-student add-on, e.g. Transport at their distance
+// slab, or a one-off custom charge/waiver not part of the class structure)
+// ------------------------------------------------------------
+model StudentFeeItem {
+  id              String       @id @default(uuid())
+  student         Student      @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  studentId       String
+  feeType         FeeType      @default(OTHER)
+  label           String // e.g. "Transport Fee (3-6 km)"
+  amount          Decimal      @default(0) @db.Decimal(12, 2)
+  frequency       FeeFrequency @default(ANNUAL)
+  academicSession String
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  payments FeePayment[]
+
+  @@index([studentId])
+  @@map("student_fee_items")
+}
+
+// ------------------------------------------------------------
 // SETTINGS (singleton table)
 // ------------------------------------------------------------
+enum InstitutionType {
+  COLLEGE
+  SCHOOL
+}
+
 model Settings {
-  id                 String   @id @default("1")
-  collegeName        String   @default("Your College Name")
+  id                 String          @id @default("1")
+  institutionType    InstitutionType @default(COLLEGE)
+  collegeName        String          @default("Your Institution Name")
   collegeAddress     String?
   collegePhone       String?
   collegeEmail       String?
   logoUrl            String?
-  currentSession     String   @default("2025-2026")
-  receiptPrefix      String   @default("RCPT")
-  receiptNextNumber  Int      @default(1)
-  studentIdPrefix    String   @default("STU")
-  authorizedSignatory String  @default("Accounts Officer")
-  updatedAt          DateTime @updatedAt
+  logoPublicId       String?
+  currentSession     String          @default("2025-2026")
+  receiptPrefix      String          @default("RCPT")
+  receiptNextNumber  Int             @default(1)
+  studentIdPrefix    String          @default("STU")
+  authorizedSignatory String         @default("Accounts Officer")
+  updatedAt          DateTime        @updatedAt
 
   @@map("settings")
 }

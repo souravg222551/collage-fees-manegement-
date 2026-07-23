@@ -3,7 +3,6 @@ import { Search, X, UserCheck } from 'lucide-react';
 import { studentApi } from '../../api/services';
 import useDebounce from '../../hooks/useDebounce';
 import { initials } from '../../utils/format';
-import { BASE_URL } from '../../api/client';
 
 const StudentSelect = ({ value, onChange }) => {
   const [query, setQuery] = useState('');
@@ -34,7 +33,7 @@ const StudentSelect = ({ value, onChange }) => {
     return (
       <div className="flex items-center gap-3 p-3 rounded-lg border border-brand-200 dark:border-brand-500/30 bg-brand-50 dark:bg-brand-500/10">
         {value.photoUrl ? (
-          <img src={`${BASE_URL}${value.photoUrl}`} alt="" className="w-9 h-9 rounded-full object-cover" />
+          <img src={value.photoUrl} alt="" className="w-9 h-9 rounded-full object-cover" />
         ) : (
           <div className="w-9 h-9 rounded-full bg-brand-100 dark:bg-brand-500/20 text-brand-700 dark:text-brand-400 flex items-center justify-center text-xs font-semibold">
             {initials(value.firstName, value.lastName)}
@@ -83,7 +82,7 @@ const StudentSelect = ({ value, onChange }) => {
               className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-left"
             >
               {s.photoUrl ? (
-                <img src={`${BASE_URL}${s.photoUrl}`} alt="" className="w-8 h-8 rounded-full object-cover" />
+                <img src={s.photoUrl} alt="" className="w-8 h-8 rounded-full object-cover" />
               ) : (
                 <div className="w-8 h-8 rounded-full bg-brand-100 dark:bg-brand-500/20 text-brand-700 dark:text-brand-400 flex items-center justify-center text-xs font-semibold">
                   {initials(s.firstName, s.lastName)}

@@ -1,4 +1,5 @@
 const asyncHandler = require('express-async-handler');
+const crypto = require('crypto');
 const prisma = require('../config/prisma');
 const ApiError = require('../utils/ApiError');
 const ApiResponse = require('../utils/ApiResponse');
@@ -26,6 +27,9 @@ const collectFee = asyncHandler(async (req, res) => {
   const {
     studentId,
     feeType,
+    label,
+    structureItemId,
+    studentFeeItemId,
     academicSession,
     semester,
     totalAmount,
@@ -49,6 +53,9 @@ const collectFee = asyncHandler(async (req, res) => {
       data: {
         studentId,
         feeType: feeType || 'TUITION',
+        label: label || null,
+        structureItemId: structureItemId || null,
+        studentFeeItemId: studentFeeItemId || null,
         academicSession,
         semester: Number(semester),
         totalAmount: Number(totalAmount),
@@ -68,7 +75,7 @@ const collectFee = asyncHandler(async (req, res) => {
 
     let receipt = null;
     if (Number(amountPaid || 0) > 0) {
-      const receiptNumber = await generateReceiptNumber();
+      const receiptNumber = await generateReceiptNumber(tx);
       const qrPayload = JSON.stringify({ receiptNumber, studentId: student.studentId, amount: amountPaid });
       const qrCodeData = await QRCode.toDataURL(qrPayload);
 
@@ -81,6 +88,86 @@ const collectFee = asyncHandler(async (req, res) => {
   });
 
   res.status(201).json(new ApiResponse(201, result, 'Fee payment recorded successfully'));
+});
+
+// @desc    Collect payment for MULTIPLE fee components in one submission
+//          (e.g. Tuition + Transport together), each becoming its own
+//          FeePayment (so per-category tracking stays accurate) but
+//          sharing a transactionGroupId so they can be shown/printed together.
+// @route   POST /api/fees/bulk
+// @access  Private
+const collectFeeBulk = asyncHandler(async (req, res) => {
+  const { studentId, academicSession, semester, paymentMode, transactionRef, remarks, items } = req.body;
+
+  if (!studentId || !Array.isArray(items) || items.length === 0) {
+    throw new ApiError(422, 'studentId and a non-empty items[] array are required');
+  }
+
+  const student = await prisma.student.findUnique({ where: { id: studentId } });
+  if (!student) throw new ApiError(404, 'Student not found');
+
+  const transactionGroupId = crypto.randomUUID();
+
+  const results = await prisma.$transaction(
+    async (tx) => {
+      const created = [];
+      for (const item of items) {
+        const totalAmount = Number(item.totalAmount) || 0;
+        const amountPaid = Number(item.amountPaid) || 0;
+        if (totalAmount <= 0) continue;
+
+        const { balance, status } = computeDerivedFields({
+          totalAmount,
+          amountPaid,
+          discount: item.discount || 0,
+          scholarship: item.scholarship || 0,
+          fine: item.fine || 0,
+        });
+
+        const payment = await tx.feePayment.create({
+          data: {
+            studentId,
+            feeType: item.feeType || 'OTHER',
+            label: item.label || null,
+            structureItemId: item.structureItemId || null,
+            studentFeeItemId: item.studentFeeItemId || null,
+            academicSession,
+            semester: Number(semester) || 0,
+            totalAmount,
+            amountPaid,
+            discount: Number(item.discount) || 0,
+            scholarship: Number(item.scholarship) || 0,
+            fine: Number(item.fine) || 0,
+            balance,
+            status,
+            paymentMode: paymentMode || 'CASH',
+            transactionRef,
+            remarks,
+            transactionGroupId,
+            collectedById: req.admin.id,
+          },
+        });
+
+        let receipt = null;
+        if (amountPaid > 0) {
+          const receiptNumber = await generateReceiptNumber(tx);
+          const qrPayload = JSON.stringify({ receiptNumber, studentId: student.studentId, amount: amountPaid });
+          const qrCodeData = await QRCode.toDataURL(qrPayload);
+          receipt = await tx.receipt.create({ data: { receiptNumber, feePaymentId: payment.id, qrCodeData } });
+        }
+
+        created.push({ payment, receipt });
+      }
+      return created;
+    },
+    { timeout: 20000 } // generous ceiling — this loop can touch several items in one submission
+  );
+
+  if (results.length === 0) {
+    throw new ApiError(422, 'No valid fee items were submitted');
+  }
+
+  res.status(201).json(new ApiResponse(201, { transactionGroupId, items: results }, 'Fee payment recorded successfully'));
 });
 
 // @desc    List fee payments with filters and pagination
@@ -191,7 +278,7 @@ const updateFeePayment = asyncHandler(async (req, res) => {
     // Issue a receipt if the payment is now paid/partial but had no receipt yet
     let receipt = existing.receipt;
     if (!receipt && Number(merged.amountPaid) > 0) {
-      const receiptNumber = await generateReceiptNumber();
+      const receiptNumber = await generateReceiptNumber(tx);
       const qrPayload = JSON.stringify({ receiptNumber, feePaymentId: payment.id });
       const qrCodeData = await QRCode.toDataURL(qrPayload);
       receipt = await tx.receipt.create({ data: { receiptNumber, feePaymentId: payment.id, qrCodeData } });
@@ -217,6 +304,7 @@ const deleteFeePayment = asyncHandler(async (req, res) => {
 
 module.exports = {
   collectFee,
+  collectFeeBulk,
   getFeePayments,
   getFeePaymentById,
   updateFeePayment,

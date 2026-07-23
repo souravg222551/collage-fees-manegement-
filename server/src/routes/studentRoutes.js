@@ -9,7 +9,7 @@ const {
   deleteStudent,
   getFilterOptions,
 } = require('../controllers/studentController');
-const { protect } = require('../middleware/auth');
+const { protect, authorize } = require('../middleware/auth');
 const { uploadStudentPhoto } = require('../middleware/upload');
 const validate = require('../middleware/validate');
 const { studentValidator } = require('../validators/studentValidators');
@@ -27,6 +27,6 @@ router
   .route('/:id')
   .get(getStudentById)
   .put(uploadStudentPhoto.single('photo'), updateStudent)
-  .delete(deleteStudent);
+  .delete(authorize('SUPER_ADMIN', 'ADMIN'), deleteStudent);
 
 module.exports = router;
