@@ -8,13 +8,38 @@ const defaultPrisma = require('../config/prisma');
 // "Transaction not found" or silently lose track of. When called outside
 // any transaction, omit `client` and it falls back to the shared instance.
 
-// Generates the next sequential Student ID, e.g. STU-2026-0007
+// Generates the next sequential Student ID, e.g. STU-2026-0007, and
+// atomically increments a persistent counter in Settings. Deliberately
+// does NOT derive the number from student.count() — that count drops the
+// moment any student is deleted, which would eventually reissue an ID that
+// still exists on another record and fail with a duplicate-key error.
+//
+// Self-healing: if the counter is behind reality (e.g. right after this
+// counter was introduced, when existing students already occupy the low
+// numbers), it keeps advancing past any ID that's already taken instead of
+// colliding.
 const generateStudentId = async (client = defaultPrisma) => {
   const settings = await getOrCreateSettings(client);
   const year = new Date().getFullYear();
-  const count = await client.student.count();
-  const next = String(count + 1).padStart(4, '0');
-  return `${settings.studentIdPrefix}-${year}-${next}`;
+
+  let candidateNumber = settings.studentIdNextNumber;
+  let studentId;
+  // Cap the search so a runaway loop can't hang the request; in practice
+  // this only ever iterates past the handful of pre-existing IDs, if any.
+  for (let attempts = 0; attempts < 10000; attempts++) {
+    studentId = `${settings.studentIdPrefix}-${year}-${String(candidateNumber).padStart(4, '0')}`;
+    // eslint-disable-next-line no-await-in-loop
+    const existing = await client.student.findUnique({ where: { studentId }, select: { id: true } });
+    if (!existing) break;
+    candidateNumber += 1;
+  }
+
+  await client.settings.update({
+    where: { id: settings.id },
+    data: { studentIdNextNumber: candidateNumber + 1 },
+  });
+
+  return studentId;
 };
 
 // Generates the next sequential receipt number and atomically increments
